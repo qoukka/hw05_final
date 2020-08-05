@@ -90,7 +90,7 @@ class PostsTest(TestCase):
                 "slug": self.group.slug})		
         ]
 
-    def check_post_equal(self, link, text):
+    def check_post_equal(self, link, text, user):
         response = self.authorized_client.get(link)
         paginator = response.context.get('paginator')
         if paginator is not None:
@@ -99,8 +99,13 @@ class PostsTest(TestCase):
         else:
             post = response.context['post']
         self.assertEqual(post.text, text)
-        self.assertEqual(post.author, self.user)
+        self.assertEqual(post.author, user)
         self.assertEqual(post.group, self.group)
+
+    def check_post_not_equal(self, link, text):
+        response = self.authorized_client.get(link)
+        paginator = response.context.get('paginator')
+        self.assertEqual(paginator.count, 0)
 
     def test_profile(self):
         response = self.authorized_client.get("/alena/")
@@ -128,7 +133,7 @@ class PostsTest(TestCase):
         self.urls()
         for link in self.urlslist:
             cache.clear()
-            self.check_post_equal(link, self.text)
+            self.check_post_equal(link, self.text, self.user)
 
     def test_auth_edit_post(self):
         self.response_auth()
@@ -149,7 +154,7 @@ class PostsTest(TestCase):
         self.assertEqual(post_check.text, self.text_edited)
         for link in self.urlslist:
             cache.clear()
-            self.check_post_equal(link, self.text_edited)
+            self.check_post_equal(link, self.text_edited, self.user)
 
     def test_image_tag_post(self):
         self.response_image(self.image)
@@ -184,8 +189,6 @@ class PostsTest(TestCase):
         self.assertNotContains(response, "Джонни Кэш")
 
     def test_subscribe(self):
-        self.response_auth()
-        self.response_auth_another_user()
         self.authorized_client.post(reverse("profile_follow", kwargs={
             'username': self.user2}))
         follow = Follow.objects.filter(user=self.user, author=self.user2).count()
@@ -194,3 +197,47 @@ class PostsTest(TestCase):
             'username': self.user2}))
         follow = Follow.objects.filter(user=self.user, author=self.user2).count()
         self.assertEqual(follow, 0)
+
+    def comments(self, auth):
+        if auth == "authorized":
+            self.authorized_client.post(reverse("add_comment", kwargs={
+            'username': self.user,
+            'post_id': self.post_check.id
+            }), data={
+            'text': self.text,
+            'post': self.post_check.id,
+            'author': self.user.id})
+        else:
+            self.unauthorized_client.post(reverse("add_comment", kwargs={
+            'username': self.user,
+            'post_id': self.post_check.id
+            }), data={
+            'text': self.text,
+            'post': self.post_check.id,
+            'author': self.user.id})
+        self.comment = self.post_check.comments.select_related('author').first()
+
+    def test_check_comments(self):
+        self.response_auth()
+        self.post_checks()
+        self.comments(auth="authorized")
+        self.assertEqual(Comment.objects.count(), 1)
+        self.assertEqual(self.comment.text, self.text)
+        self.assertEqual(self.comment.post, self.post_check)
+        self.assertEqual(self.comment.author, self.user)
+
+    def test_check_comments_no_auth(self):
+        self.response_auth()
+        self.post_checks()
+        self.comments(auth="unauthorized")
+        self.assertEqual(Comment.objects.count(), 0)
+
+    def test_index_follow(self):
+        self.response_auth_another_user()
+        self.authorized_client.post(reverse("profile_follow", kwargs={
+            'username': self.user2}))
+        self.check_post_equal(reverse("follow_index"), self.text, self.user2)
+
+    def test_index_unfollow(self):
+        self.response_auth_another_user()
+        self.check_post_not_equal(reverse("follow_index"), self.text)
