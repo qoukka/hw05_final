@@ -5,7 +5,11 @@ from django.contrib.auth.models import User
 from .models import Post, Group, Follow, Comment
 from django.urls import reverse
 from django.core.cache import cache
-
+import mock
+from django.core.files import File
+from PIL import Image
+from io import BytesIO
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 
 class PostsTest(TestCase):
@@ -23,10 +27,7 @@ class PostsTest(TestCase):
         self.authorized_client2.force_login(self.user2)
         self.text_edited = "Редактированный тестовый пост"
         self.text = "Ку-ку"
-        self.tag = "<img"		
-        self.image = "media/posts/test.png"		
-        self.text = "media/posts/test.txt"
-        
+        self.tag = "<img"			
 
 
     def response_auth(self):
@@ -56,10 +57,22 @@ class PostsTest(TestCase):
             follow=True
         )
 
-    def response_image(self, file):		
-        with open(file,'rb') as img:		
-            self.authorized_client.post(reverse("new_post"), data={		
-                "text": 'Text',		
+    def response_image(self):		
+        file = BytesIO()
+        image = Image.new('RGBA',
+                      size=(960, 339),
+                      color=(0, 5, 0)
+                      )
+        image.save(file, 'png')
+        file.name = 'test.png'
+        file.seek(0)
+        img = SimpleUploadedFile(
+            file.name,
+            file.read(),
+            content_type='image/png'
+            )
+        self.authorized_client.post(reverse("new_post"), data={		
+                "text": self.text,		
                 "author": self.authorized_client,		
                 "group": self.group.id,		
                 "image": img,		
@@ -157,24 +170,31 @@ class PostsTest(TestCase):
             self.check_post_equal(link, self.text_edited, self.user)
 
     def test_image_tag_post(self):
-        self.response_image(self.image)
+        self.response_image()
         self.post_checks()
         self.urls_image()
+        cache.clear()
         response = self.authorized_client.get(self.urlslist_image[1])
         self.assertContains(response, self.tag)
 
     def test_image_tag_other(self):
-        self.response_image(self.image)
+        self.response_image()
         self.post_checks()
         self.urls_image()
         for link in self.urlslist_image:
+            cache.clear()
             response = self.authorized_client.get(link)
             self.assertContains(response, self.tag)
 
     def test__load_non_image_file(self):
-        self.response_image(self.text)
-        self.post_checks()
-        self.assertIsNone(self.post_check)
+        file_mock = mock.MagicMock(spec=File, name='test.txt')
+        response = self.authorized_client.post(reverse('new_post'),
+                                             {'text': self.text,
+                                              'group': self.group.id,
+                                              'image': file_mock},
+                                             follow=True)
+        cache.clear()
+        self.assertFormError(response,form='form', field='image', errors='Загрузите правильное изображение. Файл, который вы загрузили, поврежден или не является изображением.')
 		
     def test_cache_index(self):
         self.authorized_client.post(
@@ -193,11 +213,15 @@ class PostsTest(TestCase):
             'username': self.user2}))
         follow = Follow.objects.filter(user=self.user, author=self.user2).count()
         self.assertNotEqual(follow, 0)
+
+    def test_unsubscribe(self):
+        self.authorized_client.post(reverse("profile_follow", kwargs={
+            'username': self.user2}))
         self.authorized_client.post(reverse("profile_unfollow", kwargs={
             'username': self.user2}))
         follow = Follow.objects.filter(user=self.user, author=self.user2).count()
         self.assertEqual(follow, 0)
-
+    
     def comments(self, auth):
         if auth == "authorized":
             self.authorized_client.post(reverse("add_comment", kwargs={

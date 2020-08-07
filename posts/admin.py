@@ -13,7 +13,5 @@ class GroupAdmin(admin.ModelAdmin):
     list_display = ("title", "slug", "description") 
     search_fields = ("text",) 
 
-
-
 admin.site.register(Post, PostAdmin)
 admin.site.register(Group, GroupAdmin)

@@ -50,7 +50,7 @@ def profile(request, username):
     posts_list = user.author_posts.all()
     all_posts_count = user.author_posts.count()
     if request.user.is_authenticated:
-        following = Follow.objects.filter(user=request.user, author=user).count()
+        following = Follow.objects.filter(user=request.user, author=user).exists()
     else:
         following = False
     paginator  = Paginator(posts_list, 10)
@@ -130,9 +130,8 @@ def server_error(request):
 
 @login_required  
 def follow_index(request):
-    favorite_authors = Follow.objects.select_related('author').filter(user=request.user).values_list("author")
-    post_list = Post.objects.filter(author__in=favorite_authors)
-    paginator = Paginator(post_list, 10)
+    posts = Post.objects.filter(author__following__user=request.user)
+    paginator = Paginator(posts, 10)
     page_number = request.GET.get("page")
     page = paginator.get_page(page_number)
     return render(
